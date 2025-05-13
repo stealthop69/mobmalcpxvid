@@ -1,42 +1,43 @@
 from flask import Flask, request, jsonify
 from pymongo import MongoClient
 import os
+import datetime
 
 app = Flask(__name__)
 
-# MongoDB setup (use the connection string provided by Railway)
-client = MongoClient(os.getenv("MONGO_URI"))  # You’ll store this in environment variables
-db = client['file_upload_db']
-files_collection = db['files']
+# MongoDB connection from Railway environment variable
+client = MongoClient(os.getenv("MONGO_URI"))
+db = client['malware_db']
+collection = db['uploads']
 
-# Ensure the 'uploads' folder exists (local uploads folder)
-UPLOAD_FOLDER = '/home/your_username/uploads'
+# Upload folder (temporary only)
+UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    os.makedirs(app.config['UPLOAD_FOLDER'])
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 @app.route('/upload', methods=['POST'])
-def upload_file():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
+def upload_files():
+    files = request.files.getlist('files')
+    device_name = request.form.get('device_name', 'unknown')
 
-    # Save the file
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(file_path)
+    if not files:
+        return jsonify({"error": "No files provided"}), 400
 
-    # Store file metadata in MongoDB
-    file_data = {
-        'file_name': file.filename,
-        'file_size': os.path.getsize(file_path),
-        'upload_time': 'CURRENT_TIMESTAMP'  # You can store timestamp here or handle it later
-    }
-    files_collection.insert_one(file_data)
+    uploaded = []
+    for file in files:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file.save(file_path)
+        
+        file_data = {
+            "device_name": device_name,
+            "file_name": file.filename,
+            "file_size": os.path.getsize(file_path),
+            "upload_time": datetime.datetime.utcnow()
+        }
+        collection.insert_one(file_data)
+        uploaded.append(file.filename)
 
-    return jsonify({"message": "File uploaded successfully"}), 200
+    return jsonify({"message": "Files uploaded", "files": uploaded}), 200
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=8000)
