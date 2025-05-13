@@ -1,43 +1,42 @@
 from flask import Flask, request, jsonify
 from pymongo import MongoClient
 import os
-import datetime
 
 app = Flask(__name__)
 
-# MongoDB connection from Railway environment variable
+# MongoDB setup (use the connection string provided by MongoDB Atlas or Railway)
 client = MongoClient(os.getenv("MONGO_URI"))
-db = client['malware_db']
-collection = db['uploads']
+db = client['file_upload_db']
+files_collection = db['files']
 
-# Upload folder (temporary only)
-UPLOAD_FOLDER = 'uploads'
+# Ensure the 'uploads' folder exists (local uploads folder)
+UPLOAD_FOLDER = '/home/your_username/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
+    os.makedirs(app.config['UPLOAD_FOLDER'])
 
 @app.route('/upload', methods=['POST'])
-def upload_files():
-    files = request.files.getlist('files')
-    device_name = request.form.get('device_name', 'unknown')
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
 
-    if not files:
-        return jsonify({"error": "No files provided"}), 400
+    # Save the file
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    file.save(file_path)
 
-    uploaded = []
-    for file in files:
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-        file.save(file_path)
-        
-        file_data = {
-            "device_name": device_name,
-            "file_name": file.filename,
-            "file_size": os.path.getsize(file_path),
-            "upload_time": datetime.datetime.utcnow()
-        }
-        collection.insert_one(file_data)
-        uploaded.append(file.filename)
+    # Store file metadata in MongoDB
+    file_data = {
+        'file_name': file.filename,
+        'file_size': os.path.getsize(file_path),
+        'upload_time': 'CURRENT_TIMESTAMP'  # You can store timestamp here or handle it later
+    }
+    files_collection.insert_one(file_data)
 
-    return jsonify({"message": "Files uploaded", "files": uploaded}), 200
+    return jsonify({"message": "File uploaded successfully"}), 200
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8000)
+    app.run(debug=True)
